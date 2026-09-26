@@ -3,7 +3,7 @@
   "private": true,
   "description": "QR menu, ordering & payments for street food vendors",
   "scripts": {
-    "postinstall": "npm install --prefix backend && npm install --prefix frontend",
+    "postinstall": "npm install --prefix backend && npm install --prefix frontend --include=dev",
     "dev": "concurrently -k -n api,web -c blue,magenta \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
     "seed": "npm run seed --prefix backend",
     "build": "npm run build --prefix frontend",
@@ -11,5 +11,8 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

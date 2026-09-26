@@ -116,8 +116,20 @@ npm run build      # builds the frontend into frontend/dist
 npm start          # backend serves the API + website on PORT
 ```
 
-Works on any Node host (Render, Railway, a VPS…). Set the `.env` values as environment variables there, plus `NODE_ENV=production`.
-Then print your QR code from the live site so it contains your real web address.
+One server runs everything (API + website + live updates). Works on any Node 20+ host (Render, Railway, a VPS…).
+
+**Before deploying:** MongoDB Atlas → Network Access → **Allow Access from Anywhere** (`0.0.0.0/0`).
+Hosting services connect from changing IP addresses, so a single allowed IP won't work.
+
+**Render (free tier):**
+1. Push the code to GitHub (`.env` is ignored, it never goes to GitHub)
+2. Render → New → **Web Service** → pick the repo
+3. Build command: `npm install && npm run build` · Start command: `npm start`
+4. Environment variables: `NODE_ENV=production`, `MONGODB_URI`, `JWT_SECRET`, `DB_NAME`, `TIMEZONE`
+   (same values as your `backend/.env`; Render sets `PORT` itself). Optional: `DEMO_PAYMENTS=on` for a demo site without real payments
+5. Open the `https://<name>.onrender.com` link, log in, and print your QR codes from there so they contain the real web address
+
+Free Render services sleep after ~15 minutes without visitors, so the first page load after that takes up to a minute.
 
 ## API overview
 
