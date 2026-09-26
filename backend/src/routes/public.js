@@ -18,7 +18,7 @@ const orderLimiter = rateLimit({
 });
 
 const PUBLIC_SHOP_FIELDS =
-  'shopName slug description address phone openingHours coverUpdatedAt logoUpdatedAt isOpen acceptCounter acceptOnline ratingSum ratingCount';
+  'shopName slug description address phone openingHours coverUpdatedAt logoUpdatedAt isOpen acceptCounter acceptOnline razorpayKeyId ratingSum ratingCount';
 
 async function findShop(slug) {
   const vendor = await Vendor.findOne({ slug: String(slug).toLowerCase() });
@@ -40,7 +40,7 @@ function publicShop(vendor) {
     isOpen: vendor.isOpen,
     rating: vendor.rating,
     ratingCount: vendor.ratingCount,
-    payments: { counter: vendor.acceptCounter, online: vendor.acceptOnline },
+    payments: { counter: vendor.acceptCounter, online: vendor.acceptOnline && Boolean(vendor.onlinePaymentMode) },
   };
 }
 
@@ -97,7 +97,7 @@ router.post('/shops/:slug/orders', orderLimiter, async (req, res) => {
   const vendor = await findShop(req.params.slug);
   const data = validate(placeOrderSchema, req.body);
   const order = await orders.createOrder(vendor, data);
-  const payment = order.paymentMethod === 'online' ? await payments.startOnlinePayment(order) : null;
+  const payment = order.paymentMethod === 'online' ? await payments.startOnlinePayment(order, vendor) : null;
   res.status(201).json({ code: order.code, payment });
 });
 
@@ -111,6 +111,7 @@ async function publicOrder(order) {
   const vendor = await Vendor.findById(order.vendor).select(PUBLIC_SHOP_FIELDS);
   const json = order.toJSON();
   delete json.payment.gatewayOrderId;
+  delete json.payment.gatewayKeyId;
   return { ...json, shop: vendor ? publicShop(vendor) : null };
 }
 
@@ -143,7 +144,8 @@ async function findUnpaidOnlineOrder(code) {
 // Start (or retry) an online payment
 router.post('/orders/:code/pay', async (req, res) => {
   const order = await findUnpaidOnlineOrder(req.params.code);
-  res.json({ payment: await payments.startOnlinePayment(order) });
+  const vendor = await Vendor.findById(order.vendor);
+  res.json({ payment: await payments.startOnlinePayment(order, vendor) });
 });
 
 const verifySchema = z.object({
@@ -158,11 +160,11 @@ router.post('/orders/:code/pay/verify', async (req, res) => {
   const order = await findOrderByCode(req.params.code);
   const valid =
     data.razorpay_order_id === order.payment.gatewayOrderId &&
-    payments.verifyCheckoutSignature({
+    (await payments.verifyCheckoutSignature(order, {
       gatewayOrderId: data.razorpay_order_id,
       paymentId: data.razorpay_payment_id,
       signature: data.razorpay_signature,
-    });
+    }));
   if (!valid) throw new HttpError(400, 'Payment could not be verified. If money was deducted, it will be refunded.');
 
   const updated = await orders.markPaid(order._id, {
@@ -173,10 +175,11 @@ router.post('/orders/:code/pay/verify', async (req, res) => {
   res.json({ order: await publicOrder(updated) });
 });
 
-// Simulated gateway used when no Razorpay keys are configured (development / demos only)
+// Simulated gateway for shops that haven't connected Razorpay (development / demos only)
 router.post('/orders/:code/pay/demo', async (req, res) => {
-  if (payments.mode !== 'demo') throw new HttpError(404, 'Not found');
   const order = await findUnpaidOnlineOrder(req.params.code);
+  const vendor = await Vendor.findById(order.vendor);
+  if (vendor?.onlinePaymentMode !== 'demo') throw new HttpError(404, 'Not found');
   const updated = await orders.markPaid(order._id, { provider: 'demo', paymentId: `demo_pay_${order.code}` });
   res.json({ order: await publicOrder(updated) });
 });
@@ -231,12 +234,6 @@ router.post('/orders/:code/reviews', async (req, res) => {
   if (!saved.length) throw new HttpError(409, 'You have already rated these dishes');
   await order.save();
   res.status(201).json({ order: await publicOrder(order) });
-});
-
-/* ------------------------------------------- Config ------------------------------------------- */
-
-router.get('/config', (req, res) => {
-  res.json({ paymentMode: payments.mode });
 });
 
 module.exports = router;

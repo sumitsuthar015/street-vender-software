@@ -59,6 +59,7 @@ const orderSchema = new mongoose.Schema(
     payment: {
       provider: { type: String, enum: ['cash', 'razorpay', 'demo', null], default: null },
       gatewayOrderId: { type: String, default: null },
+      gatewayKeyId: { type: String, default: null }, // which Razorpay account the gateway order was made on
       paymentId: { type: String, default: null },
       refundId: { type: String, default: null },
       paidAt: { type: Date, default: null },

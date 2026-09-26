@@ -27,7 +27,9 @@ async function createOrder(vendor, { customerName, customerPhone, note, paymentM
     }
   }
   if (paymentMethod === 'counter' && !vendor.acceptCounter) throw new HttpError(400, 'This shop only accepts online payment');
-  if (paymentMethod === 'online' && !vendor.acceptOnline) throw new HttpError(400, 'This shop only accepts payment at the counter');
+  if (paymentMethod === 'online' && !(vendor.acceptOnline && vendor.onlinePaymentMode)) {
+    throw new HttpError(400, 'This shop only accepts payment at the counter');
+  }
 
   // Merge duplicate lines (same item added twice)
   const quantities = new Map();

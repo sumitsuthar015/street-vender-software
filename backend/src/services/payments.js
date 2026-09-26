@@ -1,9 +1,7 @@
 const crypto = require('crypto');
 const Razorpay = require('razorpay');
-const config = require('../config');
-
-const { mode, razorpayKeyId, razorpayKeySecret, webhookSecret } = config.payments;
-const razorpay = mode === 'razorpay' ? new Razorpay({ key_id: razorpayKeyId, key_secret: razorpayKeySecret }) : null;
+const Vendor = require('../models/Vendor');
+const { HttpError, decryptSecret } = require('../utils');
 
 const toPaise = (rupees) => Math.round(rupees * 100);
 
@@ -14,29 +12,68 @@ function safeEqual(a, b) {
 }
 
 /**
- * Prepares an online payment for an order. With real Razorpay keys this creates a Razorpay order
- * that the browser opens in Razorpay Checkout; without keys it returns a "demo" payment instead.
+ * The vendor's own Razorpay account (every shop gets paid into its own account).
+ * Returns null if they haven't connected Razorpay, or their saved keys can't be read.
  */
-async function startOnlinePayment(order) {
-  if (mode === 'demo') {
+async function vendorRazorpay(vendorId) {
+  const vendor = await Vendor.findById(vendorId).select('razorpayKeyId +razorpayKeySecret razorpayWebhookSecret');
+  if (!vendor?.razorpayKeyId) return null;
+
+  const keySecret = decryptSecret(vendor.razorpayKeySecret);
+  if (!keySecret) {
+    console.error(`[payments] Can't read the Razorpay secret of vendor ${vendorId} (was JWT_SECRET changed?). They must re-enter it in Settings.`);
+    return null;
+  }
+  return {
+    keyId: vendor.razorpayKeyId,
+    keySecret,
+    webhookSecret: vendor.razorpayWebhookSecret ? decryptSecret(vendor.razorpayWebhookSecret) : null,
+    client: new Razorpay({ key_id: vendor.razorpayKeyId, key_secret: keySecret }),
+  };
+}
+
+/** Checks keys with Razorpay before a vendor saves them, so typos show up right away. */
+async function checkKeys(keyId, keySecret) {
+  try {
+    await new Razorpay({ key_id: keyId, key_secret: keySecret }).orders.all({ count: 1 });
+  } catch (err) {
+    if (err.statusCode === 401) {
+      throw new HttpError(400, 'Razorpay did not accept these keys. Copy the Key ID and Key Secret again from your Razorpay dashboard.');
+    }
+    console.error('[payments] Razorpay key check failed:', err?.error?.description || err.message);
+    throw new HttpError(502, 'Could not reach Razorpay to check your keys. Please try again.');
+  }
+}
+
+/**
+ * Prepares an online payment for an order. With the shop's Razorpay keys this creates a Razorpay
+ * order that the browser opens in Razorpay Checkout; in demo mode it returns a "demo" payment instead.
+ */
+async function startOnlinePayment(order, vendor) {
+  if (vendor.onlinePaymentMode === 'demo') {
     return { mode: 'demo', amount: toPaise(order.total), currency: 'INR' };
   }
 
+  const rzp = vendor.onlinePaymentMode === 'razorpay' ? await vendorRazorpay(vendor._id) : null;
+  if (!rzp) throw new HttpError(400, 'This shop cannot take online payments right now. Please pay at the counter.');
+
   // Reuse the Razorpay order on retries so the customer can't be charged twice for one order
-  if (!order.payment.gatewayOrderId) {
-    const rzpOrder = await razorpay.orders.create({
+  // (unless the shop switched to other Razorpay keys since, e.g. from test to live)
+  if (!order.payment.gatewayOrderId || order.payment.gatewayKeyId !== rzp.keyId) {
+    const rzpOrder = await rzp.client.orders.create({
       amount: toPaise(order.total),
       currency: 'INR',
       receipt: order.code,
       notes: { orderCode: order.code },
     });
     order.payment.gatewayOrderId = rzpOrder.id;
+    order.payment.gatewayKeyId = rzp.keyId;
     await order.save();
   }
 
   return {
     mode: 'razorpay',
-    keyId: razorpayKeyId,
+    keyId: rzp.keyId,
     gatewayOrderId: order.payment.gatewayOrderId,
     amount: toPaise(order.total),
     currency: 'INR',
@@ -44,24 +81,28 @@ async function startOnlinePayment(order) {
 }
 
 /** Checks the signature Razorpay Checkout returns after a successful payment. */
-function verifyCheckoutSignature({ gatewayOrderId, paymentId, signature }) {
-  if (mode !== 'razorpay') return false;
-  const expected = crypto.createHmac('sha256', razorpayKeySecret).update(`${gatewayOrderId}|${paymentId}`).digest('hex');
+async function verifyCheckoutSignature(order, { gatewayOrderId, paymentId, signature }) {
+  const rzp = await vendorRazorpay(order.vendor);
+  if (!rzp) return false;
+  const expected = crypto.createHmac('sha256', rzp.keySecret).update(`${gatewayOrderId}|${paymentId}`).digest('hex');
   return safeEqual(expected, signature);
 }
 
-function verifyWebhookSignature(rawBody, signature) {
-  if (!webhookSecret || !signature) return false;
-  const expected = crypto.createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
+async function verifyWebhookSignature(vendorId, rawBody, signature) {
+  const rzp = await vendorRazorpay(vendorId);
+  if (!rzp?.webhookSecret || !signature) return false;
+  const expected = crypto.createHmac('sha256', rzp.webhookSecret).update(rawBody).digest('hex');
   return safeEqual(expected, signature);
 }
 
 /** Returns { ok, refundId } - refunds the full amount of a paid online order. */
 async function refund(order) {
   if (order.payment.provider === 'demo') return { ok: true, refundId: `demo_refund_${order.code}` };
-  if (order.payment.provider !== 'razorpay' || !razorpay) return { ok: false };
+  if (order.payment.provider !== 'razorpay') return { ok: false };
   try {
-    const result = await razorpay.payments.refund(order.payment.paymentId, {
+    const rzp = await vendorRazorpay(order.vendor);
+    if (!rzp) return { ok: false };
+    const result = await rzp.client.payments.refund(order.payment.paymentId, {
       amount: toPaise(order.total),
       notes: { orderCode: order.code },
     });
@@ -72,4 +113,4 @@ async function refund(order) {
   }
 }
 
-module.exports = { mode, startOnlinePayment, verifyCheckoutSignature, verifyWebhookSignature, refund };
+module.exports = { checkKeys, startOnlinePayment, verifyCheckoutSignature, verifyWebhookSignature, refund };

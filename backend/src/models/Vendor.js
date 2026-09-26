@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const config = require('../config');
 
 const imageField = { type: { data: Buffer, contentType: String }, select: false };
 
@@ -37,6 +38,12 @@ const vendorSchema = new mongoose.Schema(
     acceptCounter: { type: Boolean, default: true },
     acceptOnline: { type: Boolean, default: true },
 
+    // The vendor's own Razorpay account: online payments go straight to them.
+    // Secrets are encrypted (utils.encryptSecret) and never sent to the browser.
+    razorpayKeyId: { type: String, default: '' },
+    razorpayKeySecret: { type: String, default: '', select: false },
+    razorpayWebhookSecret: { type: String, default: '' }, // optional
+
     // Sum/count of every food rating the shop received; average is derived.
     ratingSum: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 },
@@ -46,6 +53,12 @@ const vendorSchema = new mongoose.Schema(
 
 vendorSchema.virtual('rating').get(function () {
   return this.ratingCount ? Math.round((this.ratingSum / this.ratingCount) * 10) / 10 : null;
+});
+
+// How this shop takes online payments: "razorpay" (own account), "demo" (simulated, dev only) or null (can't)
+vendorSchema.virtual('onlinePaymentMode').get(function () {
+  if (this.razorpayKeyId) return 'razorpay';
+  return config.payments.demo ? 'demo' : null;
 });
 
 vendorSchema.virtual('coverUrl').get(function () {
@@ -66,6 +79,16 @@ vendorSchema.set('toJSON', {
     delete ret.ratingSum;
     delete ret.cover;
     delete ret.logo;
+    ret.razorpay = ret.razorpayKeyId
+      ? {
+          keyId: ret.razorpayKeyId,
+          testMode: ret.razorpayKeyId.startsWith('rzp_test_'),
+          webhook: Boolean(ret.razorpayWebhookSecret),
+        }
+      : null;
+    delete ret.razorpayKeyId;
+    delete ret.razorpayKeySecret;
+    delete ret.razorpayWebhookSecret;
     return ret;
   },
 });

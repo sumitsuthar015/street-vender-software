@@ -14,13 +14,12 @@ if (!jwtSecret) {
   process.exit(1);
 }
 
-const razorpayKeyId = env('RAZORPAY_KEY_ID');
-const razorpayKeySecret = env('RAZORPAY_KEY_SECRET');
-// Placeholder keys (like the "rzp_test_mock..." ones in old setups) can't talk to Razorpay,
-// so treat them the same as "no keys" and fall back to the built-in demo payment screen.
-const hasRealRazorpayKeys =
-  Boolean(razorpayKeyId && razorpayKeySecret) &&
-  !/mock|your_|xxxx/i.test(`${razorpayKeyId}${razorpayKeySecret}`);
+if (env('RAZORPAY_KEY_ID') || env('RAZORPAY_KEY_SECRET')) {
+  console.warn(
+    '[config] RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET in backend/.env are not used anymore.\n' +
+      '         Each vendor connects their own Razorpay account in Dashboard > Settings > Payment options.'
+  );
+}
 
 module.exports = {
   isProduction,
@@ -31,10 +30,8 @@ module.exports = {
   jwtExpiresIn: env('JWT_EXPIRES_IN', '7d'),
   timezone: env('TIMEZONE', 'Asia/Kolkata'),
   payments: {
-    // "razorpay" = real Razorpay checkout, "demo" = simulated gateway for development
-    mode: hasRealRazorpayKeys ? 'razorpay' : 'demo',
-    razorpayKeyId: hasRealRazorpayKeys ? razorpayKeyId : null,
-    razorpayKeySecret: hasRealRazorpayKeys ? razorpayKeySecret : null,
-    webhookSecret: env('RAZORPAY_WEBHOOK_SECRET'),
+    // Shops that haven't connected their own Razorpay account get a simulated payment screen.
+    // On while developing, off in production so nobody gets "paid" orders without real money.
+    demo: env('DEMO_PAYMENTS', isProduction ? 'off' : 'on') !== 'off',
   },
 };

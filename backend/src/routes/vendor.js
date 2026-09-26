@@ -6,7 +6,8 @@ const Order = require('../models/Order');
 const Review = require('../models/Review');
 const { requireVendor } = require('../middleware/auth');
 const orders = require('../services/orders');
-const { HttpError, validate, objectId, dayKey, lastDayKeys, randomCode, parseImageDataUrl, z } = require('../utils');
+const payments = require('../services/payments');
+const { HttpError, validate, objectId, dayKey, lastDayKeys, randomCode, parseImageDataUrl, encryptSecret, z } = require('../utils');
 
 // Everything here is for the logged-in vendor's dashboard
 const router = express.Router();
@@ -43,14 +44,59 @@ function setShopImage(vendor, field, value) {
   }
 }
 
+/** Customers must always have some way to pay. */
+function assertCanTakePayment(vendor) {
+  if (vendor.acceptCounter || (vendor.acceptOnline && vendor.onlinePaymentMode)) return;
+  throw new HttpError(
+    400,
+    vendor.acceptOnline
+      ? 'Keep "Pay at counter" on until your Razorpay account is connected'
+      : 'Keep at least one payment option switched on'
+  );
+}
+
 router.patch('/profile', async (req, res) => {
   const { cover, logo, ...data } = validate(profileSchema, req.body);
   const vendor = req.vendor;
   Object.assign(vendor, data);
   setShopImage(vendor, 'cover', cover);
   setShopImage(vendor, 'logo', logo);
-  if (!vendor.acceptCounter && !vendor.acceptOnline) {
-    throw new HttpError(400, 'Keep at least one payment option switched on');
+  assertCanTakePayment(vendor);
+  await vendor.save();
+  res.json({ vendor });
+});
+
+/* ------------------------------------ Razorpay account ------------------------------------ */
+
+const razorpaySchema = z.object({
+  keyId: z
+    .string()
+    .trim()
+    .regex(/^rzp_(test|live)_[A-Za-z0-9]+$/, 'Key ID should look like rzp_test_... or rzp_live_...'),
+  keySecret: z.string().trim().min(10, 'Please paste your Key Secret').max(100),
+  webhookSecret: z.string().trim().max(100).optional().or(z.literal('')),
+});
+
+// Connect (or change) the vendor's own Razorpay account. Their online payments go straight to it.
+router.put('/razorpay', async (req, res) => {
+  const { keyId, keySecret, webhookSecret } = validate(razorpaySchema, req.body);
+  await payments.checkKeys(keyId, keySecret);
+
+  const vendor = await Vendor.findById(req.vendor._id).select('+razorpayKeySecret');
+  vendor.razorpayKeyId = keyId;
+  vendor.razorpayKeySecret = encryptSecret(keySecret);
+  vendor.razorpayWebhookSecret = webhookSecret ? encryptSecret(webhookSecret) : '';
+  await vendor.save();
+  res.json({ vendor });
+});
+
+router.delete('/razorpay', async (req, res) => {
+  const vendor = await Vendor.findById(req.vendor._id).select('+razorpayKeySecret');
+  vendor.razorpayKeyId = '';
+  vendor.razorpayKeySecret = '';
+  vendor.razorpayWebhookSecret = '';
+  if (!vendor.acceptCounter && !vendor.onlinePaymentMode) {
+    throw new HttpError(400, 'Turn on "Pay at counter" first, otherwise customers will have no way to pay you');
   }
   await vendor.save();
   res.json({ vendor });

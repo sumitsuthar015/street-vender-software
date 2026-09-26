@@ -136,7 +136,7 @@ export const QrPoster = forwardRef(function QrPoster({ shop, table, compact = fa
 
         {!compact && (
           <div className="mt-4 flex flex-wrap justify-center gap-1.5">
-            {shop.acceptOnline && (
+            {shop.acceptOnline && shop.onlinePaymentMode && (
               <span className="inline-flex items-center gap-1 rounded-full border border-gray-200 px-2.5 py-1 text-[11px] font-semibold text-gray-700">
                 <Smartphone className="h-3 w-3 text-brand-600" /> UPI · Cards
               </span>

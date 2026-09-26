@@ -36,7 +36,7 @@ Customers scan it, order from their phone, pay online or at the counter, watch t
 | Frontend | React 18, Vite, Tailwind CSS, Framer Motion (animations), Socket.IO client, qrcode.react, html-to-image (poster PNG) |
 | Backend | Node.js, Express 5, Socket.IO (live updates), JWT login, Zod validation |
 | Database | MongoDB (Atlas) with Mongoose. Everything is stored here, including dish photos |
-| Payments | Razorpay (UPI/cards/wallets) + pay at counter. Built-in demo mode when no keys are set |
+| Payments | Razorpay (UPI/cards/wallets), each vendor with their own account + pay at counter. Demo mode for shops without keys |
 
 ```
 backend/src
@@ -78,9 +78,8 @@ Copy `backend/.env.example` to `backend/.env` if you don't have one.
 |---|---|
 | `MONGODB_URI` | MongoDB Atlas connection string |
 | `DB_NAME` | Database name (default `street_vendor`) |
-| `JWT_SECRET` | Long random string used to sign logins |
-| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | Leave empty for **demo payments**. Add Razorpay keys for real payments |
-| `RAZORPAY_WEBHOOK_SECRET` | Optional, see below |
+| `JWT_SECRET` | Long random string used to sign logins and encrypt vendors' Razorpay keys (changing it means vendors re-enter their keys) |
+| `DEMO_PAYMENTS` | `on`/`off`: simulated online payments for shops without Razorpay keys. Default `on` in development, `off` in production |
 | `TIMEZONE` | For daily token numbers & "today" stats (default `Asia/Kolkata`) |
 
 If MongoDB Atlas refuses the connection, go to Atlas → **Network Access** and allow your IP address.
@@ -94,17 +93,20 @@ If MongoDB Atlas refuses the connection, go to Atlas → **Network Access** and 
 with the price from the database (customers can't change prices), and verifies Razorpay's signature before marking it paid.
 If the vendor rejects a paid order, or the customer cancels, it is refunded through Razorpay automatically.
 
-**Demo mode** (no keys in `.env`): a fake payment screen with "success" and "fail" buttons. No real money moves.
+**Every vendor uses their own Razorpay account**, so each shop's money goes straight to that shop. There are no
+Razorpay keys in `.env`. The Key Secret is stored encrypted and is never sent back to the browser.
 
-**Going live with Razorpay:**
+**Demo mode** (shop hasn't connected Razorpay, `DEMO_PAYMENTS=on`): a fake payment screen with "success" and "fail"
+buttons. No real money moves. With `DEMO_PAYMENTS=off` (default in production) such shops only take payment at the counter.
+
+**Connecting Razorpay (each vendor):**
 1. Create an account at https://dashboard.razorpay.com, switch to **Test Mode**, then Account & Settings → API Keys
-2. Put the keys in `backend/.env` and restart. Test with Razorpay's test cards/UPI (`success@razorpay`)
-3. Recommended: Webhooks → add `https://<your-domain>/api/webhooks/razorpay` with events `payment.captured` and `order.paid`,
-   and put its secret in `RAZORPAY_WEBHOOK_SECRET` (confirms payments even if the customer closes the browser)
-4. After Razorpay activates your account (KYC), switch to Live keys
-
-Note: with one set of keys, all online payments go into **one** Razorpay account (yours). If many different vendors use
-the platform, you then pay them out, or use [Razorpay Route](https://razorpay.com/route/) to split payments to each vendor automatically.
+2. In this app: Dashboard → **Settings → Payment options → Connect your Razorpay account**, paste Key ID + Key Secret.
+   The keys are checked with Razorpay before saving. Test with Razorpay's test UPI `success@razorpay`
+3. Recommended once the app is online: in Razorpay, Webhooks → add the URL shown in Settings
+   (`https://<your-domain>/api/webhooks/razorpay/<vendorId>`) with events `payment.captured` and `order.paid`,
+   and paste the same webhook secret in Settings (confirms payments even if the customer closes the browser)
+4. After Razorpay activates the account (KYC), replace the test keys with Live keys in Settings
 
 ## Put it online (production)
 
@@ -123,6 +125,7 @@ Then print your QR code from the live site so it contains your real web address.
 |---|---|---|
 | `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me` | vendor | account |
 | `PATCH /api/vendor/profile`, `POST /api/vendor/password` | vendor | settings, photos (`cover`/`logo`), open/close shop |
+| `PUT/DELETE /api/vendor/razorpay` | vendor | connect / disconnect the shop's own Razorpay account |
 | `POST /api/vendor/tables`, `PATCH/DELETE /api/vendor/tables/:code` | vendor | tables for table-wise QR |
 | `GET/POST /api/vendor/menu`, `PATCH/DELETE /api/vendor/menu/:id` | vendor | menu |
 | `GET /api/vendor/orders?scope=active\|history` | vendor | orders |
@@ -134,6 +137,6 @@ Then print your QR code from the live site so it contains your real web address.
 | `GET /api/orders/:code`, `POST /api/orders/:code/cancel`, `POST /api/orders/:code/switch-to-counter` | customer | track / change order |
 | `POST /api/orders/:code/pay`, `…/pay/verify`, `…/pay/demo` | customer | online payment |
 | `POST /api/orders/:code/reviews` | customer | rate dishes |
-| `POST /api/webhooks/razorpay` | Razorpay | payment confirmation |
+| `POST /api/webhooks/razorpay/:vendorId` | Razorpay | payment confirmation (per vendor) |
 
 Live updates (Socket.IO): vendors get `order:new` / `order:updated`; customers get `order:changed` for their order.

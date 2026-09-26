@@ -50,9 +50,9 @@ initRealtime(server);
 server.listen(config.port, () => {
   console.log(`[server] API running on http://localhost:${config.port}`);
   console.log(
-    config.payments.mode === 'razorpay'
-      ? '[payments] Razorpay is ON (real checkout)'
-      : '[payments] DEMO mode: no Razorpay keys in .env, online payments are simulated'
+    config.payments.demo
+      ? '[payments] Each shop uses its own Razorpay keys. Shops without keys get DEMO (simulated) online payments'
+      : '[payments] Each shop uses its own Razorpay keys. Shops without keys can only take payment at the counter'
   );
 });
 
