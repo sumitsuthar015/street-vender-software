@@ -1,102 +1,73 @@
 const mongoose = require('mongoose');
-const { VENDOR_STATUS } = require('../config/constants');
+
+const imageField = { type: { data: Buffer, contentType: String }, select: false };
+
+// A table in the shop. Each one gets its own QR code: /s/<slug>?table=<code>
+const tableSchema = new mongoose.Schema(
+  {
+    code: { type: String, required: true }, // short random code, stays the same when the table is renamed
+    name: { type: String, required: true, trim: true, maxlength: 30 },
+  },
+  { _id: false }
+);
 
 const vendorSchema = new mongoose.Schema(
   {
-    owner: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-      unique: true
-    },
-    registrationEmail: {
-      type: String,
-      required: [true, 'Vendor email is required'],
-      unique: true,
-      sparse: true,
-      trim: true,
-      lowercase: true
-    },
-    stallName: {
-      type: String,
-      required: [true, 'Stall name is required'],
-      trim: true
-    },
-    slug: {
-      type: String,
-      unique: true,
-      lowercase: true,
-      trim: true
-    },
-    description: {
-      type: String,
-      default: 'Delicious local street food prepared fresh.'
-    },
-    logo: {
-      type: String,
-      default: 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=300&auto=format&fit=crop&q=80'
-    },
-    coverImage: {
-      type: String,
-      default: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=1000&auto=format&fit=crop&q=80'
-    },
-    cuisineType: [{ type: String }],
-    address: {
-      street: String,
-      city: String,
-      pincode: String,
-      landmark: String
-    },
-    location: {
-      type: { type: String, default: 'Point' },
-      coordinates: { type: [Number], default: [77.209, 28.6139] } // [lng, lat]
-    },
-    openingHours: {
-      openTime: { type: String, default: '09:00' },
-      closeTime: { type: String, default: '22:00' }
-    },
-    isOpen: {
-      type: Boolean,
-      default: true
-    },
-    preparationTimeMin: {
-      type: Number,
-      default: 15
-    },
-    status: {
-      type: String,
-      enum: Object.values(VENDOR_STATUS),
-      default: VENDOR_STATUS.PENDING
-    },
-    isVerified: {
-      type: Boolean,
-      default: false
-    },
-    commissionRate: {
-      type: Number,
-      default: 5.0 // 5% default platform commission
-    },
-    qrCodeUrl: {
-      type: String,
-      default: ''
-    },
-    rating: {
-      type: Number,
-      default: 4.5
-    },
-    totalReviews: {
-      type: Number,
-      default: 0
-    },
-    bankDetails: {
-      accountNumber: String,
-      ifscCode: String,
-      upiId: String
-    }
+    name: { type: String, required: true, trim: true, maxlength: 80 },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    passwordHash: { type: String, required: true, select: false },
+    phone: { type: String, trim: true, default: '' },
+
+    shopName: { type: String, required: true, trim: true, maxlength: 80 },
+    // Used in the customer URL / QR code: /s/<slug>
+    slug: { type: String, required: true, unique: true },
+    description: { type: String, trim: true, maxlength: 300, default: '' },
+    address: { type: String, trim: true, maxlength: 200, default: '' },
+    openingHours: { type: String, trim: true, maxlength: 60, default: '' }, // free text, e.g. "5 PM - 11 PM"
+
+    // Stall photo (big banner) and logo, stored in MongoDB and served by /api/images/shop/:id/...
+    cover: imageField,
+    coverUpdatedAt: { type: Date, default: null },
+    logo: imageField,
+    logoUpdatedAt: { type: Date, default: null },
+
+    tables: { type: [tableSchema], default: [] },
+
+    isOpen: { type: Boolean, default: true },
+    acceptCounter: { type: Boolean, default: true },
+    acceptOnline: { type: Boolean, default: true },
+
+    // Sum/count of every food rating the shop received; average is derived.
+    ratingSum: { type: Number, default: 0 },
+    ratingCount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
 
-vendorSchema.index({ location: '2dsphere' });
+vendorSchema.virtual('rating').get(function () {
+  return this.ratingCount ? Math.round((this.ratingSum / this.ratingCount) * 10) / 10 : null;
+});
+
+vendorSchema.virtual('coverUrl').get(function () {
+  return this.coverUpdatedAt ? `/api/images/shop/${this._id}/cover?v=${this.coverUpdatedAt.getTime()}` : null;
+});
+
+vendorSchema.virtual('logoUrl').get(function () {
+  return this.logoUpdatedAt ? `/api/images/shop/${this._id}/logo?v=${this.logoUpdatedAt.getTime()}` : null;
+});
+
+vendorSchema.set('toJSON', {
+  virtuals: true,
+  versionKey: false,
+  transform: (doc, ret) => {
+    ret.id = String(ret._id);
+    delete ret._id;
+    delete ret.passwordHash;
+    delete ret.ratingSum;
+    delete ret.cover;
+    delete ret.logo;
+    return ret;
+  },
+});
 
 module.exports = mongoose.model('Vendor', vendorSchema);

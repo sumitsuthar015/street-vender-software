@@ -1,128 +1,139 @@
-# Smart Street Vendor Ordering & Management Platform
+# StreetMenu: QR menu, ordering & payments for street food vendors
 
-A production-quality, scalable, mobile-first full-stack web application designed specifically for **street-food vendors, food carts, stalls, kiosks, small restaurants, and local food hubs**.
+Vendors register, add their menu, print a QR poster (one for the stall, one per table) and stick it up.
+Customers scan it, order from their phone, pay online or at the counter, watch the order status live, and rate the food.
 
----
+## What it does
 
-## 🌟 Key Features & Core Flow
+**Vendor (dashboard)**
+- Register / log in with email + password
+- Menu: add dishes with price, photo, category, veg/non-veg, prep time; one-tap "sold out"
+- Live orders: new orders ring with a sound and get a daily token number (#1, #2, …)
+  - Accept → Ready → Hand over, or Reject with a reason (online payments are refunded automatically)
+  - Pay-at-counter orders show how much cash to collect
+- Home: today's orders, earnings, cash to collect, rating, 7-day earnings chart, best sellers, top rated dishes
+- Reviews: all ratings and comments, filter by stars
+- QR codes:
+  - **Stall poster** with your stall photo, logo, name, tagline, opening hours, rating, address and phone.
+    Your logo sits in the middle of the QR. Download as a high-resolution PNG (for a print shop) or print it.
+  - **Table-wise QR codes**: add tables (one by one or "+5 / +10"), rename, delete; poster per table with the
+    table name; "Print all" prints every table's QR. Orders from a table show the table name on the vendor's order card.
+- Settings: stall photo & logo, shop details, opening hours, open/closed switch, payment options, change password
 
-1. **QR-Based Instant Storefront Access**:
-   - Unique Stall QR (`/vendor/:vendorId`) and Table QR (`/vendor/:vendorId/table/:tableId`) generation.
-   - Customers scan QR and arrive directly at the vendor's digital menu without searching.
+**Customer (no app, no login)**
+- Scan QR → menu with the stall photo & logo, search, veg-only filter, sort by rating/price, category tabs
+- Scanned a table QR? The menu says "You're at Table 4" and the order is served at that table
+- Ratings on every dish, "Top rated" and "Bestseller" badges, "Customers love these" section
+- Checkout with name (+ optional phone and note), choose **Pay online** or **Pay at counter**
+- Live order tracking with token number: placed → preparing (with ready time) → ready → collected
+- Cancel before the shop accepts; switch a failed online payment to pay at counter
+- Rate each dish after collecting the order (only real customers can rate, once per order)
 
-2. **Mobile OTP & Password Authentication**:
-   - Customer login via 10-digit mobile number & 6-digit OTP (with built-in development fallback/universal demo OTP `123456`).
-   - Role-based authorization for **Customers**, **Vendors**, and **Super Admins**.
+## Tech
 
-3. **Food Customizations & Inventory Control**:
-   - Spice level, size options, extra cheese/sauce add-ons.
-   - Real-time stock quantity tracking with low-stock alerts (`⚠️ Only 5 left!`) and automatic out-of-stock disabling.
+| Part | Stack |
+|---|---|
+| Frontend | React 18, Vite, Tailwind CSS, Framer Motion (animations), Socket.IO client, qrcode.react, html-to-image (poster PNG) |
+| Backend | Node.js, Express 5, Socket.IO (live updates), JWT login, Zod validation |
+| Database | MongoDB (Atlas) with Mongoose. Everything is stored here, including dish photos |
+| Payments | Razorpay (UPI/cards/wallets) + pay at counter. Built-in demo mode when no keys are set |
 
-4. **Razorpay Payments & Cash Support**:
-   - Razorpay test integration + built-in fallback sandbox mock mode.
-   - Self pickup or Table Dine-in order selection.
+```
+backend/src
+  server.js        app entry (also serves the built frontend in production)
+  config.js db.js  settings from .env, MongoDB connection
+  models/          Vendor, MenuItem, Order, Review, Counter
+  routes/          auth, vendor (dashboard), public (customer), images, webhooks
+  services/        orders (order rules), payments (Razorpay), realtime (Socket.IO)
+  seed.js          creates a demo shop
+frontend/src
+  pages/           Landing, Auth, dashboard/*, shop/ShopPage (menu), shop/OrderPage (tracking)
+  components/      UI building blocks
+  lib/             api client, auth, sockets, cart, formatting
+```
 
-5. **Real-Time Kitchen Queue & Order Tracking**:
-   - Socket.IO real-time order state updates (`PENDING` → `ACCEPTED` → `PREPARING` → `READY` → `COMPLETED`).
-   - Audio alerts & floating toasts on vendor dashboard and customer tracking screen.
+## Run it on your computer
 
-6. **Digital Invoices & Verified Purchase Reviews**:
-   - Instant printable digital invoice with itemized breakdown, discounts & payment metadata.
-   - Only customers with completed orders can submit star ratings & reviews.
+Needs Node.js 18 or newer.
 
-7. **Vendor Business Analytics & Super Admin Portal**:
-   - Vendor gross sales, net earnings, peak ordering hours chart, top selling dishes & repeat customer retention rate.
-   - Super admin platform statistics, vendor application approval/rejection, customer management, and support ticket helpdesk.
-
----
-
-## 🛠️ Technology Stack
-
-- **Frontend**: React 18, Vite, Tailwind CSS, Lucide Icons, Socket.IO Client, Axios, Recharts, Canvas Confetti, QRCode SVG.
-- **Backend**: Node.js, Express.js, Socket.IO, Mongoose, JWT, bcryptjs, Razorpay SDK, QRCode.
-- **Database**: MongoDB / MongoDB Atlas.
-
----
-
-## 🚀 Quick Setup & Installation Guide
-
-### Prerequisites
-- Node.js (v18+ recommended)
-- Local MongoDB running on `mongodb://localhost:27017` or a MongoDB Atlas Connection URI.
-
-### 1. Backend Setup
 ```bash
-cd backend
+npm install        # installs root + backend + frontend
+npm run seed       # optional: creates a demo shop (demo@vendor.com / demo1234)
+npm run dev        # starts backend (port 5001) + frontend (port 5173)
+```
+
+Open http://localhost:5173
+
+- Vendor: register, or log in with the demo account
+- Customer: http://localhost:5173/s/demo-chaat-corner (or your shop's link from the **QR code** page)
+
+**Testing with your phone:** the terminal shows a `Network:` address like `http://192.168.1.5:5173`.
+Open the dashboard with that address on your computer; the QR code will then work when scanned by a phone on the same Wi-Fi.
+
+### Settings (`backend/.env`)
+
+Copy `backend/.env.example` to `backend/.env` if you don't have one.
+
+| Key | What it is |
+|---|---|
+| `MONGODB_URI` | MongoDB Atlas connection string |
+| `DB_NAME` | Database name (default `street_vendor`) |
+| `JWT_SECRET` | Long random string used to sign logins |
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | Leave empty for **demo payments**. Add Razorpay keys for real payments |
+| `RAZORPAY_WEBHOOK_SECRET` | Optional, see below |
+| `TIMEZONE` | For daily token numbers & "today" stats (default `Asia/Kolkata`) |
+
+If MongoDB Atlas refuses the connection, go to Atlas → **Network Access** and allow your IP address.
+
+## Payments
+
+**Pay at counter:** the order goes straight to the vendor. The vendor collects cash/UPI when handing over the food
+("Collect ₹X & hand over"), or taps "Mark as paid" earlier.
+
+**Pay online:** the order reaches the vendor **only after the payment succeeds**. The server creates a Razorpay order
+with the price from the database (customers can't change prices), and verifies Razorpay's signature before marking it paid.
+If the vendor rejects a paid order, or the customer cancels, it is refunded through Razorpay automatically.
+
+**Demo mode** (no keys in `.env`): a fake payment screen with "success" and "fail" buttons. No real money moves.
+
+**Going live with Razorpay:**
+1. Create an account at https://dashboard.razorpay.com, switch to **Test Mode**, then Account & Settings → API Keys
+2. Put the keys in `backend/.env` and restart. Test with Razorpay's test cards/UPI (`success@razorpay`)
+3. Recommended: Webhooks → add `https://<your-domain>/api/webhooks/razorpay` with events `payment.captured` and `order.paid`,
+   and put its secret in `RAZORPAY_WEBHOOK_SECRET` (confirms payments even if the customer closes the browser)
+4. After Razorpay activates your account (KYC), switch to Live keys
+
+Note: with one set of keys, all online payments go into **one** Razorpay account (yours). If many different vendors use
+the platform, you then pay them out, or use [Razorpay Route](https://razorpay.com/route/) to split payments to each vendor automatically.
+
+## Put it online (production)
+
+```bash
 npm install
+npm run build      # builds the frontend into frontend/dist
+npm start          # backend serves the API + website on PORT
 ```
 
-Create/Verify `.env` in `backend/`:
-```env
-PORT=5001
-MONGODB_URI=mongodb://localhost:27017/street_vendor_db
-JWT_SECRET=super_secret_jwt_key_street_vendor_2026_safe
-JWT_EXPIRES_IN=7d
-RAZORPAY_KEY_ID=rzp_test_mock1234567890
-RAZORPAY_KEY_SECRET=mock_razorpay_secret_key_12345
-OTP_DEMO_MODE=true
-OTP_UNIVERSAL=123456
-FRONTEND_URL=http://localhost:5173
-ALLOW_IN_MEMORY_DB=true
-```
+Works on any Node host (Render, Railway, a VPS…). Set the `.env` values as environment variables there, plus `NODE_ENV=production`.
+Then print your QR code from the live site so it contains your real web address.
 
-`ALLOW_IN_MEMORY_DB=true` is intended for local development when MongoDB Atlas is unavailable.
-The fallback database is stored in `backend/.data/mongodb`, so categories and menu items survive
-backend restarts. For persistent shared production data, allow your IP address in MongoDB Atlas
-and remove this setting.
+## API overview
 
-#### Run Database Seed Script:
-Populate database with sample vendors, categories, food items, tables, and test users:
-```bash
-npm run seed
-```
+| Method & path | Who | What |
+|---|---|---|
+| `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me` | vendor | account |
+| `PATCH /api/vendor/profile`, `POST /api/vendor/password` | vendor | settings, photos (`cover`/`logo`), open/close shop |
+| `POST /api/vendor/tables`, `PATCH/DELETE /api/vendor/tables/:code` | vendor | tables for table-wise QR |
+| `GET/POST /api/vendor/menu`, `PATCH/DELETE /api/vendor/menu/:id` | vendor | menu |
+| `GET /api/vendor/orders?scope=active\|history` | vendor | orders |
+| `PATCH /api/vendor/orders/:id/status`, `POST /api/vendor/orders/:id/mark-paid` | vendor | update order |
+| `GET /api/vendor/stats`, `GET /api/vendor/reviews` | vendor | dashboard numbers, reviews |
+| `GET /api/shops/:slug?table=CODE`, `GET /api/shops/:slug/items/:id/reviews` | customer | menu (+ which table), dish reviews |
+| `GET /api/images/menu/:id`, `GET /api/images/shop/:id/cover`, `…/logo` | anyone | photos stored in MongoDB |
+| `POST /api/shops/:slug/orders` | customer | place order (`tableCode` for dine-in) |
+| `GET /api/orders/:code`, `POST /api/orders/:code/cancel`, `POST /api/orders/:code/switch-to-counter` | customer | track / change order |
+| `POST /api/orders/:code/pay`, `…/pay/verify`, `…/pay/demo` | customer | online payment |
+| `POST /api/orders/:code/reviews` | customer | rate dishes |
+| `POST /api/webhooks/razorpay` | Razorpay | payment confirmation |
 
-#### Start Backend API & Socket Server:
-```bash
-npm run dev
-```
-Backend runs on `http://localhost:5001`.
-
----
-
-### 2. Frontend Setup
-In a new terminal window:
-```bash
-cd frontend
-npm install
-npm run dev
-```
-Frontend runs on `http://localhost:5173`.
-
----
-
-## 🔑 Demo Account Credentials
-
-| Role | Mobile / Identifier | Password / OTP | Description |
-| :--- | :--- | :--- | :--- |
-| **Super Admin** | `9999999999` | `admin123` | Platform governance, vendor approval, stats |
-| **Approved Vendor** | `9876543210` | `vendor123` | Delhi Chaat Corner (Kitchen Queue, Menu, QR) |
-| **Customer** | Any 10-digit mobile | `123456` | OTP mobile login & checkout |
-
----
-
-## 🧪 Verification & Manual Testing Steps
-
-1. **Customer QR Flow**:
-   - Open `http://localhost:5173/vendor/delhi-chaat-corner`
-   - Select food items (e.g. *Mumbai Vada Pav*, *Special Samosa*), customize spice level / extra cheese, and click **Add**.
-2. **Mobile Login & Checkout**:
-   - Enter mobile `9123456789` -> Use Demo OTP `123456` -> Proceed to checkout.
-   - Select Razorpay Online Payment or Cash -> Confirm order.
-3. **Real-time Kitchen Dashboard**:
-   - Open `http://localhost:5173/vendor/dashboard` in a new tab.
-   - Watch the new order appear under **NEW ORDERS**. Click **Accept** → **Start Preparing** → **Mark Ready** → **Complete**.
-   - Notice live updates & sound alerts on customer tracking screen!
-4. **Digital Invoice & Verified Review**:
-   - On customer order page, click **View Digital Invoice** to inspect itemized printable receipt.
-   - Rate stall with 5 stars & comment upon completion.
-"# street-vender-software" 
+Live updates (Socket.IO): vendors get `order:new` / `order:updated`; customers get `order:changed` for their order.
